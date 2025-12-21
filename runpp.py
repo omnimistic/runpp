@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+from tkinter import filedialog, messagebox
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -34,10 +35,13 @@ tab_bar.grid_columnconfigure(999, weight=1)  # spacer
 
 tabs = {}
 active_tab = None
+previous_active_tab = None
 tab_counter = 1
 
 def switch_tab(name):
-    global active_tab
+    global active_tab, previous_active_tab
+    if active_tab is not None and active_tab != name:
+        previous_active_tab = active_tab
     active_tab = name
 
     for tab_name, tab_data in tabs.items():
@@ -55,14 +59,42 @@ def switch_tab(name):
 
 def close_tab(name):
     global active_tab
-    if len(tabs) == 1:
-        return  # never close last tab
+    tab = tabs.get(name)
+    if not tab:
+        return False
 
-    tabs[name]["frame"].destroy()
+    if tab["content"] != tab["saved_content"]:
+        filename = tab["button"].cget("text").rstrip("*")
+        response = messagebox.askyesnocancel(
+            "Unsaved Changes",
+            f"Save changes to {filename} before closing?"
+        )
+        if response is None:
+            return False
+        if response:
+            if not save_current_tab():
+                return False
+
+    tab["frame"].destroy()
     del tabs[name]
+    return True
 
-    active_tab = list(tabs.keys())[0]
-    switch_tab(active_tab)
+def close_current_tab():
+    global active_tab, previous_active_tab
+    if active_tab is None:
+        return
+
+    if not close_tab(active_tab):
+        return
+
+    if previous_active_tab in tabs:
+        switch_tab(previous_active_tab)
+        previous_active_tab = None
+    elif tabs:
+        active_tab = list(tabs.keys())[0]
+        switch_tab(active_tab)
+    else:
+        new_tab()
 
 def new_tab():
     global tab_counter
@@ -97,7 +129,9 @@ def new_tab():
         "frame": frame,
         "button": btn,
         "close": close_btn,
-        "content": ""
+        "content": "",
+        "saved_content": "",
+        "path": None
     }
 
     switch_tab(name)
@@ -126,12 +160,146 @@ code_editor = tk.Text(
 )
 code_editor.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
-# Sync content when typing
 def on_edit(event=None):
     if active_tab:
-        tabs[active_tab]["content"] = code_editor.get("1.0", "end-1c")
+        current = code_editor.get("1.0", "end-1c")
+        tabs[active_tab]["content"] = current
+        
+        tab_data = tabs[active_tab]
+        title = tab_data["button"].cget("text")
+        if current != tab_data["saved_content"]:
+            if not title.endswith("*"):
+                tab_data["button"].configure(text=title + "*")
+        else:
+            if title.endswith("*"):
+                tab_data["button"].configure(text=title[:-1])
 
 code_editor.bind("<KeyRelease>", on_edit)
+
+# File operations
+def save_current_tab():
+    if active_tab is None or active_tab not in tabs:
+        return False
+    tab = tabs[active_tab]
+
+    if tab["path"] is None:
+        return save_as_current_tab()
+    else:
+        try:
+            with open(tab["path"], "w", encoding="utf-8") as f:
+                f.write(tab["content"])
+            tab["saved_content"] = tab["content"]
+            title = tab["button"].cget("text")
+            if title.endswith("*"):
+                tab["button"].configure(text=title[:-1])
+            return True
+        except Exception as e:
+            messagebox.showerror("Save Failed", f"Could not save:\n{e}")
+            return False
+
+def save_as_current_tab():
+    if active_tab is None or active_tab not in tabs:
+        return False
+    tab = tabs[active_tab]
+
+    filetypes = [("C++ files", "*.cpp *.h *.hpp"), ("All files", "*.*")]
+    path = filedialog.asksaveasfilename(
+        title="Save As",
+        defaultextension=".cpp",
+        filetypes=filetypes,
+        initialfile=tab["button"].cget("text").rstrip("*")
+    )
+    if not path:
+        return False
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(tab["content"])
+        tab["path"] = path
+        tab["saved_content"] = tab["content"]
+        filename = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
+        tab["button"].configure(text=filename)
+        return True
+    except Exception as e:
+        messagebox.showerror("Save Failed", f"Could not save:\n{e}")
+        return False
+
+def open_file():
+    filetypes = [("C++ files", "*.cpp *.h *.hpp"), ("Text files", "*.txt"), ("All files", "*.*")]
+    path = filedialog.askopenfilename(title="Open File", filetypes=filetypes)
+    if not path:
+        return
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        for tab_name, tab in tabs.items():
+            if tab["path"] == path:
+                switch_tab(tab_name)
+                return
+
+        filename = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
+
+        frame = ctk.CTkFrame(tab_bar, fg_color="transparent")
+        frame.grid(row=0, column=len(tabs), padx=(0, 4))
+
+        btn = ctk.CTkButton(
+            frame,
+            text=filename,
+            height=28,
+            fg_color="#1f1f1f",
+            hover_color="#333333",
+            corner_radius=5,
+            command=lambda n=filename: switch_tab(n)
+        )
+        btn.grid(row=0, column=0)
+
+        close_btn = ctk.CTkButton(
+            frame,
+            text="×",
+            width=28,
+            height=28,
+            fg_color="transparent",
+            hover_color="#aa3333",
+            command=lambda n=filename: close_tab(n)
+        )
+
+        tabs[filename] = {
+            "frame": frame,
+            "button": btn,
+            "close": close_btn,
+            "content": content,
+            "saved_content": content,
+            "path": path
+        }
+
+        switch_tab(filename)
+        code_editor.delete("1.0", "end")
+        code_editor.insert("1.0", content)
+
+    except Exception as e:
+        messagebox.showerror("Open Failed", f"Could not open file:\n{e}")
+
+# Keyboard shortcuts
+def on_key_press(event):
+    if event.keysym == "s" and event.state & 0x4:  # Ctrl+S
+        save_current_tab()
+        return "break"
+    elif event.keysym == "o" and event.state & 0x4:  # Ctrl+O
+        open_file()
+        return "break"
+    elif event.keysym == "t" and event.state & 0x4:  # Ctrl+T
+        new_tab()
+        return "break"
+    elif event.keysym == "w" and event.state & 0x4:  # Ctrl+W
+        close_current_tab()
+        return "break"
+
+app.bind_all("<Control-s>", on_key_press)
+app.bind_all("<Control-o>", on_key_press)
+app.bind_all("<Control-t>", on_key_press)
+app.bind_all("<Control-w>", on_key_press)
 
 # Initial tab
 new_tab()
@@ -143,6 +311,7 @@ int main() {
     return 0;
 }
 """
+tabs[active_tab]["saved_content"] = tabs[active_tab]["content"]
 code_editor.insert("1.0", tabs[active_tab]["content"])
 switch_tab(active_tab)
 
