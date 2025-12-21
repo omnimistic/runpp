@@ -1,6 +1,9 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
+import re
+import json
+import os
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -8,6 +11,20 @@ ctk.set_default_color_theme("dark-blue")
 app = ctk.CTk()
 app.title("Run++")
 app.geometry("1000x600")
+
+# Load syntax highlighting from Hsyntax/default.json
+SYNTAX_DIR = "Hsyntax"
+SYNTAX_FILE = os.path.join(SYNTAX_DIR, "default.json")
+
+theme = {}
+try:
+    with open(SYNTAX_FILE, "r", encoding="utf-8") as f:
+        theme = json.load(f)
+    theme.pop("name", None)  # remove "name" key if present
+except FileNotFoundError:
+    messagebox.showwarning("Syntax File Missing", f"Could not find {SYNTAX_FILE}.\nSyntax highlighting disabled.")
+except Exception as e:
+    messagebox.showerror("Syntax Error", f"Error loading {SYNTAX_FILE}:\n{e}")
 
 # Main Split View
 paned = tk.PanedWindow(
@@ -56,6 +73,7 @@ def switch_tab(name):
 
     code_editor.delete("1.0", "end")
     code_editor.insert("1.0", tabs[name]["content"])
+    highlight_code()
 
 def close_tab(name):
     global active_tab
@@ -160,11 +178,38 @@ code_editor = tk.Text(
 )
 code_editor.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
+# Configure tags from JSON (one tag per word)
+tag_map = {}
+for word, color in theme.items():
+    tag_name = f"hl_{word.replace('#', 'hash').replace(':', 'colon')}"
+    code_editor.tag_configure(tag_name, foreground=color)
+    tag_map[word] = tag_name
+
+# Syntax highlighting
+def highlight_code(event=None):
+    if not active_tab or not theme:
+        return
+
+    # Clear previous tags
+    for tag_name in tag_map.values():
+        code_editor.tag_remove(tag_name, "1.0", "end")
+
+    text_content = code_editor.get("1.0", "end")
+
+    for word in theme:
+        escaped = re.escape(word)
+        pattern = r'\b' + escaped + r'\b' if not word.startswith('#') else escaped
+        for match in re.finditer(pattern, text_content):
+            start = f"1.0 + {match.start()} chars"
+            end = f"1.0 + {match.end()} chars"
+            code_editor.tag_add(tag_map[word], start, end)
+
 def on_edit(event=None):
     if active_tab:
         current = code_editor.get("1.0", "end-1c")
         tabs[active_tab]["content"] = current
-        
+
+        # Unsaved indicator
         tab_data = tabs[active_tab]
         title = tab_data["button"].cget("text")
         if current != tab_data["saved_content"]:
@@ -173,6 +218,8 @@ def on_edit(event=None):
         else:
             if title.endswith("*"):
                 tab_data["button"].configure(text=title[:-1])
+
+        highlight_code()
 
 code_editor.bind("<KeyRelease>", on_edit)
 
@@ -277,6 +324,7 @@ def open_file():
         switch_tab(filename)
         code_editor.delete("1.0", "end")
         code_editor.insert("1.0", content)
+        highlight_code()
 
     except Exception as e:
         messagebox.showerror("Open Failed", f"Could not open file:\n{e}")
@@ -313,6 +361,7 @@ int main() {
 """
 tabs[active_tab]["saved_content"] = tabs[active_tab]["content"]
 code_editor.insert("1.0", tabs[active_tab]["content"])
+highlight_code()
 switch_tab(active_tab)
 
 # Right Panel
