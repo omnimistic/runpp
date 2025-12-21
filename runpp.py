@@ -12,19 +12,10 @@ app = ctk.CTk()
 app.title("Run++")
 app.geometry("1000x600")
 
-# Load syntax highlighting from Hsyntax/default.json
+# Syntax loading variables (global)
 SYNTAX_DIR = "Hsyntax"
 SYNTAX_FILE = os.path.join(SYNTAX_DIR, "default.json")
-
 theme = {}
-try:
-    with open(SYNTAX_FILE, "r", encoding="utf-8") as f:
-        theme = json.load(f)
-    theme.pop("name", None)  # remove "name" key if present
-except FileNotFoundError:
-    messagebox.showwarning("Syntax File Missing", f"Could not find {SYNTAX_FILE}.\nSyntax highlighting disabled.")
-except Exception as e:
-    messagebox.showerror("Syntax Error", f"Error loading {SYNTAX_FILE}:\n{e}")
 
 # Main Split View
 paned = tk.PanedWindow(
@@ -166,7 +157,7 @@ add_btn = ctk.CTkButton(
 )
 add_btn.grid(row=0, column=998, padx=5)
 
-# Code Editor
+# Code Editor (must be created before syntax loading)
 code_editor = tk.Text(
     editor_frame,
     bg="#1e1e1e",
@@ -178,14 +169,33 @@ code_editor = tk.Text(
 )
 code_editor.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
-# Configure tags from JSON (one tag per word)
+# Load syntax after code_editor exists
 tag_map = {}
-for word, color in theme.items():
-    tag_name = f"hl_{word.replace('#', 'hash').replace(':', 'colon')}"
-    code_editor.tag_configure(tag_name, foreground=color)
-    tag_map[word] = tag_name
 
-# Syntax highlighting
+def load_syntax(file_path, silent=False):
+    global theme, tag_map
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+            theme = {k: v for k, v in loaded.items() if k != "name"}
+        # Reconfigure tags
+        tag_map = {}
+        for word, color in theme.items():
+            tag_name = f"hl_{word.replace('#', 'hash').replace(':', 'colon')}"
+            code_editor.tag_configure(tag_name, foreground=color)
+            tag_map[word] = tag_name
+        if not silent:
+            messagebox.showinfo("Syntax Loaded", f"Loaded: {os.path.basename(file_path)}")
+        # Re-highlight active tab
+        if active_tab:
+            highlight_code()
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load syntax file:\n{e}")
+
+# Load initial syntax (silent = no popup)
+load_syntax(SYNTAX_FILE, silent=True)
+
+# Syntax highlighting function
 def highlight_code(event=None):
     if not active_tab or not theme:
         return
@@ -209,7 +219,6 @@ def on_edit(event=None):
         current = code_editor.get("1.0", "end-1c")
         tabs[active_tab]["content"] = current
 
-        # Unsaved indicator
         tab_data = tabs[active_tab]
         title = tab_data["button"].cget("text")
         if current != tab_data["saved_content"]:
@@ -329,6 +338,109 @@ def open_file():
     except Exception as e:
         messagebox.showerror("Open Failed", f"Could not open file:\n{e}")
 
+# Settings window
+def open_settings():
+    settings_win = ctk.CTkToplevel(app)
+    settings_win.title("Settings")
+    settings_win.geometry("600x500")
+    settings_win.resizable(False, False)
+    
+    # Make it a child window
+    settings_win.transient(app)
+    
+    # Force it to the front
+    settings_win.lift()
+    settings_win.focus_force()  # Give it keyboard focus too
+    
+    # Always on top (only while open)
+    settings_win.attributes('-topmost', True)
+    settings_win.after(100, lambda: settings_win.attributes('-topmost', False))
+
+    ctk.CTkLabel(settings_win, text="Syntax Highlighting", font=("Arial", 18, "bold")).pack(pady=15)
+
+    # Current syntax file display
+    current_label = ctk.CTkLabel(settings_win, text=f"Current: {os.path.basename(SYNTAX_FILE)}", font=("Arial", 12))
+    current_label.pack(pady=5)
+
+    def reload_current():
+        load_syntax(SYNTAX_FILE)
+        current_label.configure(text=f"Current: {os.path.basename(SYNTAX_FILE)}")
+        messagebox.showinfo("Reloaded", "Current syntax reloaded.")
+
+    ctk.CTkButton(settings_win, text="Reload Current Syntax", command=reload_current).pack(pady=5)
+
+    # Load new syntax file
+    def load_new_syntax():
+        global SYNTAX_FILE
+        path = filedialog.askopenfilename(
+            title="Select Syntax JSON File",
+            initialdir=SYNTAX_DIR,
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if path:
+            SYNTAX_FILE = path
+            load_syntax(path)
+            current_label.configure(text=f"Current: {os.path.basename(path)}")
+
+    ctk.CTkButton(settings_win, text="Load New Syntax File", command=load_new_syntax).pack(pady=10)
+
+    # Create new syntax file
+    def create_new_syntax():
+        name = ctk.CTkInputDialog(
+            title="New Syntax Theme",
+            text="Enter name for new theme (without .json):"
+        ).get_input()
+        if not name:
+            return
+
+        new_path = os.path.join(SYNTAX_DIR, f"{name}.json")
+        default_content = {
+            "name": name,
+            "int": "#ff79c6",
+            "float": "#ff79c6",
+            "double": "#ff79c6",
+            "char": "#ff79c6",
+            "void": "#ff79c6",
+            "if": "#ff79c6",
+            "else": "#ff79c6",
+            "for": "#ff79c6",
+            "while": "#ff79c6",
+            "switch": "#ff79c6",
+            "case": "#ff79c6",
+            "return": "#ff79c6",
+            "#include": "#8be9fd",
+            "cout": "#50fa7b",
+            "cin": "#50fa7b",
+            "using": "#bd93f9",
+            "namespace": "#bd93f9",
+            "std": "#bd93f9"
+        }
+
+        try:
+            with open(new_path, "w", encoding="utf-8") as f:
+                json.dump(default_content, f, indent=2)
+            messagebox.showinfo("Success", f"Created {new_path}\nEdit it and load it in settings.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not create file:\n{e}")
+
+    ctk.CTkButton(settings_win, text="Create New Syntax Theme", command=create_new_syntax).pack(pady=10)
+
+    # Revert to default
+    def revert_to_default():
+        global SYNTAX_FILE
+        default_path = os.path.join(SYNTAX_DIR, "default.json")
+        if os.path.exists(default_path):
+            SYNTAX_FILE = default_path
+            load_syntax(default_path)
+            current_label.configure(text="Current: default.json")
+        else:
+            messagebox.showerror("Not Found", "default.json not found in Hsyntax folder.")
+
+    ctk.CTkButton(settings_win, text="Revert to Default", command=revert_to_default).pack(pady=10)
+
+    ctk.CTkLabel(settings_win, text="Note: Restart the app if changes don't apply fully.", font=("Arial", 10)).pack(pady=20)
+
+
 # Keyboard shortcuts
 def on_key_press(event):
     if event.keysym == "s" and event.state & 0x4:  # Ctrl+S
@@ -343,11 +455,15 @@ def on_key_press(event):
     elif event.keysym == "w" and event.state & 0x4:  # Ctrl+W
         close_current_tab()
         return "break"
+    elif event.keysym == "S" and (event.state & 0x4) and (event.state & 0x1):  # Ctrl+Shift+S
+        open_settings()
+        return "break"
 
 app.bind_all("<Control-s>", on_key_press)
 app.bind_all("<Control-o>", on_key_press)
 app.bind_all("<Control-t>", on_key_press)
 app.bind_all("<Control-w>", on_key_press)
+app.bind_all("<Control-Shift-S>", on_key_press)
 
 # Initial tab
 new_tab()
