@@ -8,50 +8,155 @@ app = ctk.CTk()
 app.title("Run++")
 app.geometry("1000x600")
 
-#Layout
-app.grid_columnconfigure(0, weight=3)
-app.grid_columnconfigure(1, weight=2)
-app.grid_rowconfigure(0, weight=1)
+# Main Split View
+paned = tk.PanedWindow(
+    app,
+    orient=tk.HORIZONTAL,
+    sashwidth=6,
+    bg="#1a1a1a",
+    bd=0,
+    relief="flat"
+)
+paned.pack(fill="both", expand=True)
+paned.configure(cursor="sb_h_double_arrow")
 
-#Code Editor Frame
-editor_frame = ctk.CTkFrame(app, corner_radius=10)
-editor_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+# Left Panel
+editor_frame = ctk.CTkFrame(paned, corner_radius=10)
+editor_frame.grid_rowconfigure(1, weight=1)
+editor_frame.grid_columnconfigure(0, weight=1)
 
-editor_label = ctk.CTkLabel(editor_frame, text="main.cpp", font=("Consolas", 16))
-editor_label.pack(anchor="w", padx=10, pady=(10, 0))
+paned.add(editor_frame, minsize=350)
 
+# Tab Bar
+tab_bar = ctk.CTkFrame(editor_frame, height=35, corner_radius=0)
+tab_bar.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 0))
+tab_bar.grid_columnconfigure(999, weight=1)  # spacer
+
+tabs = {}
+active_tab = None
+tab_counter = 1
+
+def switch_tab(name):
+    global active_tab
+    active_tab = name
+
+    for tab_name, tab_data in tabs.items():
+        is_active = (tab_name == name)
+        tab_data["button"].configure(
+            fg_color="#2b2b2b" if is_active else "#1f1f1f"
+        )
+        if is_active:
+            tab_data["close"].grid(row=0, column=1, padx=(5, 0))
+        else:
+            tab_data["close"].grid_forget()
+
+    code_editor.delete("1.0", "end")
+    code_editor.insert("1.0", tabs[name]["content"])
+
+def close_tab(name):
+    global active_tab
+    if len(tabs) == 1:
+        return  # never close last tab
+
+    tabs[name]["frame"].destroy()
+    del tabs[name]
+
+    active_tab = list(tabs.keys())[0]
+    switch_tab(active_tab)
+
+def new_tab():
+    global tab_counter
+    name = f"untitled{tab_counter}.cpp"
+    tab_counter += 1
+
+    frame = ctk.CTkFrame(tab_bar, fg_color="transparent")
+    frame.grid(row=0, column=len(tabs), padx=(0, 4))
+
+    btn = ctk.CTkButton(
+        frame,
+        text=name,
+        height=28,
+        fg_color="#1f1f1f",
+        hover_color="#333333",
+        corner_radius=5,
+        command=lambda n=name: switch_tab(n)
+    )
+    btn.grid(row=0, column=0)
+
+    close_btn = ctk.CTkButton(
+        frame,
+        text="×",
+        width=28,
+        height=28,
+        fg_color="transparent",
+        hover_color="#aa3333",
+        command=lambda n=name: close_tab(n)
+    )
+
+    tabs[name] = {
+        "frame": frame,
+        "button": btn,
+        "close": close_btn,
+        "content": ""
+    }
+
+    switch_tab(name)
+
+# "+" Button
+add_btn = ctk.CTkButton(
+    tab_bar,
+    text="+",
+    width=32,
+    height=28,
+    fg_color="#1f1f1f",
+    hover_color="#333333",
+    command=new_tab
+)
+add_btn.grid(row=0, column=998, padx=5)
+
+# Code Editor
 code_editor = tk.Text(
     editor_frame,
     bg="#1e1e1e",
     fg="#dcdcdc",
     insertbackground="white",
     font=("Consolas", 14),
-    undo=True
+    undo=True,
+    wrap="none"
 )
-code_editor.pack(fill="both", expand=True, padx=10, pady=10)
+code_editor.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
-#Starter template
-code_editor.insert("1.0", """#include <iostream>
+# Sync content when typing
+def on_edit(event=None):
+    if active_tab:
+        tabs[active_tab]["content"] = code_editor.get("1.0", "end-1c")
+
+code_editor.bind("<KeyRelease>", on_edit)
+
+# Initial tab
+new_tab()
+tabs[active_tab]["content"] = """#include <iostream>
 using namespace std;
 
 int main() {
-    cout << "Hello, C++!" << endl;
+    cout << "Hello, Run++!" << endl;
     return 0;
 }
-""")
+"""
+code_editor.insert("1.0", tabs[active_tab]["content"])
+switch_tab(active_tab)
 
-#Right Panel
-right_frame = ctk.CTkFrame(app, corner_radius=10)
-right_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+# Right Panel
+right_frame = ctk.CTkFrame(paned, corner_radius=10)
 right_frame.grid_rowconfigure(1, weight=1)
+right_frame.grid_columnconfigure(0, weight=1)
 
-#Run Button
+paned.add(right_frame, minsize=250)
+
 def run_code():
     output_box.configure(state="normal")
     output_box.delete("1.0", "end")
-    output_box.insert("end", "Compiling...\n")
-    output_box.insert("end", "Running program...\n\n")
-    output_box.insert("end", "Hello, C++!\n")
+    output_box.insert("end", "Compiling...\nRunning...\n\nHello, Run++!\n")
     output_box.configure(state="disabled")
 
 run_button = ctk.CTkButton(
@@ -62,17 +167,17 @@ run_button = ctk.CTkButton(
 )
 run_button.pack(padx=10, pady=10, fill="x")
 
-#Output Console
-output_label = ctk.CTkLabel(right_frame, text="Output", font=("Arial", 14))
+output_label = ctk.CTkLabel(right_frame, text="Output")
 output_label.pack(anchor="w", padx=10)
 
 output_box = tk.Text(
     right_frame,
-    height=15,
     bg="#111111",
     fg="#00ff88",
     font=("Consolas", 13),
-    state="disabled"
+    state="disabled",
+    wrap="word"
 )
 output_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
 app.mainloop()
