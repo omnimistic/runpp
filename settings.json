@@ -1,0 +1,18 @@
+{
+  "auto_save": true,
+  "font_size": 14,
+  "font_family": "Consolas",
+  "theme": "dark",
+  "cpp_standard": "17",
+  "show_compiler_cmd": true,
+  "tab_width": 4,
+  "highlight_current_line": true,
+  "syntax_highlighting": 1,
+  "output_font_family": "Consolas",
+  "output_font_size": 13,
+  "output_text_color": "#00ff88",
+  "output_bg_color": "#111111",
+  "current_syntax_file": "default.json",
+  "show_system_fonts": false,
+  "font_bold": 0
+}
