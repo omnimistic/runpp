@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="for_readme/banner.png" alt="Run++ Icon" width="120">
+  <img src="for_readme/banner.png" alt="Run++ Icon">
 </p>
 
 <h1 align="center">Run++</h1>
