@@ -19,16 +19,16 @@
 
 ## ✨ Features
 
-- **🧠 Tab-based editing** — Work on multiple C++ files simultaneously
-- **🎨 JSON-based syntax highlighting** — Customize colors without touching code
-- **📏 Current-line highlighting** — Never lose your place
-- **⚡ One-click compile & run** — Instant feedback on your code
-- **🖥️ Dual execution modes** — Built-in output panel or external terminal
-- **⌨️ Full keyboard shortcuts** — Navigate and edit efficiently
-- **🧩 Custom fonts** — Use system fonts or load your own
-- **⚙️ Live settings preview** — Changes apply instantly
-- **💾 Auto-save support** — Never lose your work
-- **🧪 Interactive program support** — Handles `cin`, `getline`, and user input gracefully
+- **Tab-based editing** — Work on multiple C++ files simultaneously
+- **JSON-based syntax highlighting** — Customize colors without touching code
+- **Current-line highlighting** — Never lose your place
+- **One-click compile & run** — Instant feedback on your code
+- **Dual execution modes** — Built-in output panel or external terminal
+- **Full keyboard shortcuts** — Navigate and edit efficiently
+- **Custom fonts** — Use system fonts or load your own
+- **Live settings preview** — Changes apply instantly
+- **Auto-save support** — Never lose your work
+- **Interactive program support** — Handles `cin`, `getline`, and user input gracefully
 
 ---
 
@@ -121,71 +121,70 @@ Run++ will automatically detect the compiler in this location.
 | `Ctrl + O` | Open file |
 | `Ctrl + T` | New tab |
 | `Ctrl + W` | Close current tab |
+| `Ctrl + R` | Run current file |
 | `Ctrl + Shift + S` | Open Settings |
 
-> Note: Only tab management has GUI buttons. Save, Open, and Settings are keyboard-only.
+> Note: Save, Open, and Settings are keyboard-only.
 
 ---
 
-## 🎨 Syntax Highlighting
+## 🎨 Syntax Highlighting (New System)
 
-Run++ uses **simple JSON files** for syntax highlighting, making customization incredibly easy.
+Run++ now uses a more powerful JSON-based syntax system.
 
-### File Location
+### Location
 
-All syntax themes are stored in:
 ```
 Hsyntax/
 ```
 
-### Customizing Themes
-
-You can:
-- Edit `default.json` directly
-- Duplicate and rename it to create new themes
-- Add custom keywords without writing any code
-
-### Example Syntax File
+### Example: `default.json`
 
 ```json
+
 {
   "name": "default",
-  "int": "#ff79c6",
-  "float": "#ff79c6",
-  "double": "#ff79c6",
-  "char": "#ff79c6",
-  "void": "#ff79c6",
-  "if": "#ff79c6",
-  "else": "#ff79c6",
-  "for": "#ff79c6",
-  "while": "#ff79c6",
-  "switch": "#ff79c6",
-  "case": "#ff79c6",
-  "return": "#ff79c6",
-  "#include": "#8be9fd",
-  "cout": "#50fa7b",
-  "cin": "#50fa7b",
-  "using": "#bd93f9",
-  "namespace": "#bd93f9",
-  "std": "#bd93f9"
+  
+  "keywords": {
+    "int": "#ff79c6",
+    "float": "#ff79c6",
+    "double": "#ff79c6",
+    "char": "#ff79c6",
+    "void": "#ff79c6",
+    "if": "#ff79c6",
+    "else": "#ff79c6",
+    "for": "#ff79c6",
+    "while": "#ff79c6",
+    "switch": "#ff79c6",
+    "case": "#ff79c6",
+    "return": "#ff79c6",
+    "using": "#bd93f9",
+    "namespace": "#bd93f9",
+    "std": "#bd93f9"
+  },
+  
+  "preprocessor": "#8be9fd",
+  
+  "cout_cin": "#50fa7b",
+  
+  "string": "#f1fa8c",
+  "char_literal": "#f1fa8c",
+  "comment": "#6272a4",
+  "number": "#bd93f9",
+  "keyword": "#ff79c6"
 }
+
 ```
 
-### Adding Custom Keywords
+### How to Customize
 
-Simply add any word you want highlighted:
+- Add any keyword under `"keywords"`
 
-```json
-{
-  "myCustomFunction": "#f1fa8c",
-  "TODO": "#ff5555"
-}
-```
+- Change group colors (`preprocessor`, `cout_cin`, `string`, etc.)
 
-**Rules:**
-- All words are matched are matched literally
-- Colors use standard hex format (`#RRGGBB`)
-- Planning on adding group syntax next
+- Create new themes by duplicating and renaming files
+
+- Changes apply instantly when selected in Settings
 
 ---
 
@@ -214,7 +213,7 @@ runpp/
 ├── runpp.py              # Main application entry point
 ├── Hsyntax/               # Syntax highlighting themes
 │   └── default.json
-├── compilers/            # Compiler binaries (user-provided)
+├── compilers/            # Compiler binaries
 │   └── mingw64/
 ├── for_readme/           # Documentation assets
 │   ├── icon.png
@@ -228,7 +227,7 @@ runpp/
 
 ## 🚧 Development Status
 
-Run++ is an **educational and experimental project** designed for:
+Run++ is an educational/experimental project for:
 
 - Learning C++ fundamentals
 - Quick code testing and prototyping
@@ -266,10 +265,6 @@ See the [LICENSE](LICENSE) file for full details.
 - **Inspiration:** Lightweight C++ IDEs like Dev-C++ and Code::Blocks
 
 ---
-
-<p align="center">
-  Made with ❤️ for learners and experimenters
-</p>
 
 <p align="center">
   <a href="#top">Back to top ↑</a>
