@@ -8,6 +8,7 @@ from fontTools.ttLib import TTFont
 import subprocess
 import threading
 import platform
+import psutil
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -15,6 +16,7 @@ ctk.set_default_color_theme("dark-blue")
 app = ctk.CTk()
 app.title("Run++")
 app.geometry("1000x600")
+app.iconbitmap("icon.ico")
 
 # Settings file
 SETTINGS_FILE = "settings.json"
@@ -36,7 +38,8 @@ DEFAULT_SETTINGS = {
     "output_bg_color": "#111111",
     "current_syntax_file": "default.json",
     "show_system_fonts": False,
-    "use_external_terminal": False
+    "use_external_terminal": False,
+    "show_minimap": True  # NEW: Minimap toggle
 }
 
 # Load or create settings
@@ -109,6 +112,7 @@ def get_font_family_name(ttf_path):
     except Exception:
         return os.path.splitext(os.path.basename(ttf_path))[0]
 
+
 def load_custom_fonts():
     global loaded_custom_font_names
     loaded_custom_font_names = set()
@@ -125,17 +129,20 @@ def load_custom_fonts():
             except tk.TclError:
                 pass
 
+
 load_custom_fonts()
 
 all_tk_fonts = set(tkfont.families())
 other_system_fonts = all_tk_fonts - DEFAULT_FONTS - loaded_custom_font_names
 base_fonts = loaded_custom_font_names | DEFAULT_FONTS
 
+
 def get_available_fonts():
     if settings.get("show_system_fonts", False):
         return sorted(base_fonts | other_system_fonts)
     else:
         return sorted(base_fonts)
+
 
 available_fonts = get_available_fonts()
 
@@ -152,8 +159,7 @@ if not os.path.exists(SYNTAX_DIR):
     os.makedirs(SYNTAX_DIR)
 SYNTAX_FILE = os.path.join(SYNTAX_DIR, settings["current_syntax_file"])
 theme = {}
-tag_map = {}
-compiled_syntax_regex = None
+
 highlight_after_id = None
 
 # Main Split View
@@ -177,7 +183,7 @@ active_tab = None
 previous_active_tab = None
 tab_counter = 1
 
-# Line number setup
+# Line number & editor setup
 text_frame = ctk.CTkFrame(editor_frame)
 text_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 text_frame.grid_rowconfigure(0, weight=1)
@@ -209,16 +215,26 @@ code_editor.grid(row=0, column=1, sticky="nsew")
 scrollbar = ctk.CTkScrollbar(text_frame, command=code_editor.yview)
 scrollbar.grid(row=0, column=2, sticky="ns")
 
-
 try:
     scrollbar.configure(cursor="sb_v_double_arrow")
 except:
     pass
 
+# Minimap Canvas
+minimap = tk.Canvas(
+    text_frame,
+    width=100,
+    bg="#0a0a0a",
+    highlightthickness=0
+)
+if settings.get("show_minimap", True):
+    minimap.grid(row=0, column=3, sticky="ns")
 
 def on_scroll(*args):
     scrollbar.set(*args)
     update_line_numbers()
+    update_minimap()
+
 
 code_editor.configure(yscrollcommand=on_scroll)
 
@@ -240,26 +256,146 @@ def update_line_numbers(event=None):
         i = code_editor.index(f"{i}+1line")
         line_num += 1
 
-# Bind events to  line numbers update
-code_editor.bind("<KeyRelease>", lambda e: code_editor.after_idle(update_line_numbers))
-code_editor.bind("<MouseWheel>", lambda e: code_editor.after_idle(update_line_numbers))
-code_editor.bind("<Button-4>", lambda e: code_editor.after_idle(update_line_numbers))
-code_editor.bind("<Button-5>", lambda e: code_editor.after_idle(update_line_numbers))
-text_frame.bind("<Configure>", lambda e: code_editor.after_idle(update_line_numbers))
 
-# Bind scrollbar drag to update line numbers
+def update_minimap(event=None):
+    """Update the code minimap with fixed-height blocks"""
+    if not settings.get("show_minimap", True):
+        return
+
+    minimap.delete("all")
+
+    try:
+        text = code_editor.get("1.0", "end-1c")
+        lines = text.split('\n')
+        total_lines = len(lines)
+        
+        if total_lines == 0:
+            return
+
+        canvas_height = minimap.winfo_height()
+        canvas_width = minimap.winfo_width()
+        
+        if canvas_height <= 1:
+            return
+        
+        # Fixed height per line block (adjust if you want thicker/thinner)
+        block_height = 2  # pixels — increase to 3 or 4 if you prefer chunkier look
+        
+        # Calculate how many lines we can fit (with possible gap)
+        max_visible_blocks = canvas_height // block_height
+        # If too many lines, we'll skip some (downsampling)
+        if total_lines > max_visible_blocks * 2:
+            # Simple downsampling: group lines into blocks
+            group_size = max(1, total_lines // max_visible_blocks)
+        else:
+            group_size = 1
+
+        y = 0
+        for i in range(0, total_lines, group_size):
+            # Take representative line (first in group)
+            line = lines[i] if i < total_lines else ""
+            
+            # Color logic (same as before)
+            color = "#333333"  # default
+            if '//' in line or '/*' in line or '*/' in line:
+                color = "#4a7a4a"  # Comments
+            elif any(kw in line for kw in ['#include', '#define', '#pragma']):
+                color = "#7a4a7a"  # Preprocessor
+            elif any(kw in line for kw in ['if', 'else', 'for', 'while', 'switch', 'case']):
+                color = "#4a6a9a"  # Control flow
+            elif any(kw in line for kw in ['class', 'struct', 'int', 'void', 'return']):
+                color = "#7a7a4a"  # Keywords
+
+            # Width based on content length
+            content_length = len(line.strip())
+            block_width = min(canvas_width - 4, content_length * 1.2)  # slightly wider than before
+
+            # Draw rectangle (fixed height)
+            minimap.create_rectangle(
+                2, y, 2 + block_width, y + block_height,
+                fill=color,
+                outline="",  # no border for cleaner look
+                tags="codeblock"
+            )
+            y += block_height
+
+            if y >= canvas_height:
+                break
+
+        # Draw viewport indicator (overlay)
+        first_visible = code_editor.index("@0,0")
+        last_visible = code_editor.index("@0,%d" % code_editor.winfo_height())
+        
+        first_line = int(first_visible.split('.')[0]) - 1
+        last_line = int(last_visible.split('.')[0]) - 1
+        
+        # Map editor lines to minimap y
+        if total_lines > 0:
+            y_scale = y / total_lines  # approximate
+            viewport_y1 = first_line * y_scale
+            viewport_y2 = last_line * y_scale
+            minimap.create_rectangle(
+                0, viewport_y1, canvas_width, viewport_y2,
+                outline="#ffffff",
+                width=1,
+                fill="",
+                tags="viewport"
+            )
+
+    except Exception:
+        pass
+
+
+def on_minimap_click(event):
+    """Handle clicking on minimap to scroll"""
+    if not settings.get("show_minimap", True):
+        return
+    
+    try:
+        text = code_editor.get("1.0", "end-1c")
+        total_lines = len(text.split('\n'))
+        canvas_height = minimap.winfo_height()
+        
+        if canvas_height <= 1 or total_lines == 0:
+            return
+        
+        # Calculate which line was clicked
+        click_ratio = event.y / canvas_height
+        target_line = int(click_ratio * total_lines) + 1
+        
+        # Scroll to that line
+        code_editor.see(f"{target_line}.0")
+        update_minimap()
+    except:
+        pass
+
+
+minimap.bind("<Button-1>", on_minimap_click)
+minimap.bind("<B1-Motion>", on_minimap_click)
+
+# Bind events to update line numbers and minimap
+code_editor.bind("<KeyRelease>", lambda e: code_editor.after_idle(lambda: [update_line_numbers(), update_minimap()]))
+code_editor.bind("<MouseWheel>", lambda e: code_editor.after_idle(lambda: [update_line_numbers(), update_minimap()]))
+code_editor.bind("<Button-4>", lambda e: code_editor.after_idle(lambda: [update_line_numbers(), update_minimap()]))
+code_editor.bind("<Button-5>", lambda e: code_editor.after_idle(lambda: [update_line_numbers(), update_minimap()]))
+text_frame.bind("<Configure>", lambda e: code_editor.after_idle(lambda: [update_line_numbers(), update_minimap()]))
+
+# Bind scrollbar drag
 def on_scrollbar_command(*args):
     code_editor.yview(*args)
-    code_editor.after_idle(update_line_numbers)
+    code_editor.after_idle(lambda: [update_line_numbers(), update_minimap()])
+
 
 scrollbar.configure(command=on_scrollbar_command)
 
-# Initial update (run multiple times to ensure it works)
+# Initial update
 def initial_line_number_update():
     update_line_numbers()
-    app.after(50, update_line_numbers)
-    app.after(150, update_line_numbers)
-    app.after(300, update_line_numbers)
+    update_minimap()
+    app.after(50, lambda: [update_line_numbers(), update_minimap()])
+    app.after(150, lambda: [update_line_numbers(), update_minimap()])
+    app.after(300, lambda: [update_line_numbers(), update_minimap()])
+
 
 app.after(100, initial_line_number_update)
 
@@ -267,6 +403,7 @@ code_editor.tag_configure("current_line", background="#2a2a2a")
 
 # Global process
 process = None
+
 
 def switch_tab(tab_id):
     global active_tab, previous_active_tab
@@ -284,6 +421,8 @@ def switch_tab(tab_id):
     code_editor.insert("1.0", tabs[tab_id]["content"])
     highlight_code()
     update_line_numbers()
+    update_minimap()
+
 
 def close_tab(tab_id):
     tab = tabs.get(tab_id)
@@ -303,6 +442,7 @@ def close_tab(tab_id):
     del tabs[tab_id]
     return True
 
+
 def close_current_tab():
     global active_tab, previous_active_tab
     if active_tab is None:
@@ -317,6 +457,7 @@ def close_current_tab():
         switch_tab(active_tab)
     else:
         new_tab()
+
 
 def new_tab(path=None):
     global tab_counter
@@ -369,6 +510,7 @@ def new_tab(path=None):
     }
     switch_tab(tab_id)
 
+
 add_btn = ctk.CTkButton(
     tab_bar,
     text="+",
@@ -380,12 +522,14 @@ add_btn = ctk.CTkButton(
 )
 add_btn.grid(row=0, column=998, padx=5)
 
+
 def highlight_current_line(event=None):
     if settings["highlight_current_line"]:
         code_editor.tag_remove("current_line", "1.0", "end")
         code_editor.tag_add("current_line", "insert linestart", "insert lineend+1c")
     else:
         code_editor.tag_remove("current_line", "1.0", "end")
+
 
 def on_edit(event=None):
     global highlight_after_id
@@ -408,43 +552,124 @@ def on_edit(event=None):
             save_current_tab()
         highlight_current_line()
         update_line_numbers()
+        update_minimap()
+
 
 code_editor.bind("<KeyRelease>", on_edit)
 code_editor.bind("<Button-1>", lambda e: code_editor.after(1, highlight_current_line))
 code_editor.bind("<ButtonRelease-1>", lambda e: highlight_current_line())
 
+
 def highlight_code():
+    """Enhanced syntax highlighting using theme from JSON"""
     if not active_tab:
         return
-    for tag in tag_map.values():
-        code_editor.tag_remove(tag, "1.0", "end")
-    if settings["syntax_highlighting"] and compiled_syntax_regex:
-        text = code_editor.get("1.0", "end-1c")
-        for match in compiled_syntax_regex.finditer(text):
-            word = match.group(0)
-            tag = tag_map.get(word)
-            if tag:
-                start = f"1.0 + {match.start()} chars"
-                end = f"1.0 + {match.end()} chars"
-                code_editor.tag_add(tag, start, end)
+    
+    # Remove all previous tags
+    for tag in code_editor.tag_names():
+        if tag.startswith("hl_"):
+            code_editor.tag_remove(tag, "1.0", "end")
+    
+    if not settings["syntax_highlighting"]:
+        return
+    
+    text = code_editor.get("1.0", "end-1c")
+    
+    # Get colors from theme (with fallbacks)
+    t = theme or {}
+    kw_color = t.get("keywords", {}).get("fallback", "#ff79c6")  # fallback for keywords
+    str_color = t.get("string", "#f1fa8c")
+    char_color = t.get("char_literal", "#f1fa8c")
+    comment_color = t.get("comment", "#6272a4")
+    preprocessor_color = t.get("preprocessor", "#8be9fd")
+    number_color = t.get("number", "#bd93f9")
+    cout_cin_color = t.get("cout_cin", "#50fa7b")
+
+    # First pass: Mark strings and comments (highest priority)
+    for match in re.finditer(r'"(?:[^"\\]|\\.)*"', text):
+        start = f"1.0 + {match.start()} chars"
+        end = f"1.0 + {match.end()} chars"
+        code_editor.tag_add("hl_string", start, end)
+    
+    for match in re.finditer(r"'(?:[^'\\]|\\.)*'", text):
+        start = f"1.0 + {match.start()} chars"
+        end = f"1.0 + {match.end()} chars"
+        code_editor.tag_add("hl_char", start, end)
+    
+    # Single-line comments
+    for match in re.finditer(r'//.*?$', text, re.MULTILINE):
+        start = f"1.0 + {match.start()} chars"
+        end = f"1.0 + {match.end()} chars"
+        code_editor.tag_add("hl_comment", start, end)
+    
+    # Multi-line comments
+    for match in re.finditer(r'/\*.*?\*/', text, re.DOTALL):
+        start = f"1.0 + {match.start()} chars"
+        end = f"1.0 + {match.end()} chars"
+        code_editor.tag_add("hl_comment", start, end)
+    
+    # Preprocessor directives
+    for match in re.finditer(r'^\s*#\s*\w+', text, re.MULTILINE):
+        start = f"1.0 + {match.start()} chars"
+        end = f"1.0 + {match.end()} chars"
+        code_editor.tag_add("hl_preprocessor", start, end)
+    
+    # Numbers
+    for match in re.finditer(r'\b\d+\.?\d*[fFlL]?\b', text):
+        start_idx = match.start()
+        end_idx = match.end()
+        start = f"1.0 + {start_idx} chars"
+        end = f"1.0 + {end_idx} chars"
+        if not any(code_editor.tag_names(start)):  # not in string/comment
+            code_editor.tag_add("hl_number", start, end)
+    
+    # Second pass: Keywords (respect existing tags)
+    if "keywords" in t:
+        for word, color in t["keywords"].items():
+            if word == "fallback":
+                continue
+            pattern = rf'\b{re.escape(word)}\b'
+            for match in re.finditer(pattern, text):
+                start_idx = match.start()
+                end_idx = match.end()
+                start = f"1.0 + {start_idx} chars"
+                end = f"1.0 + {end_idx} chars"
+                if not any(code_editor.tag_names(start)):
+                    tag_name = f"hl_keyword_{word}"
+                    code_editor.tag_add(tag_name, start, end)
+                    code_editor.tag_configure(tag_name, foreground=color)
+    
+    # Special: cout and cin
+    for word in ["cout", "cin"]:
+        pattern = rf'\b{word}\b'
+        for match in re.finditer(pattern, text):
+            start_idx = match.start()
+            end_idx = match.end()
+            start = f"1.0 + {start_idx} chars"
+            end = f"1.0 + {end_idx} chars"
+            if not any(code_editor.tag_names(start)):
+                code_editor.tag_add(f"hl_{word}", start, end)
+                code_editor.tag_configure(f"hl_{word}", foreground=cout_cin_color)
+    
+    # Configure global tags
+    code_editor.tag_configure("hl_string", foreground=str_color)
+    code_editor.tag_configure("hl_char", foreground=char_color)
+    code_editor.tag_configure("hl_comment", foreground=comment_color)
+    code_editor.tag_configure("hl_preprocessor", foreground=preprocessor_color)
+    code_editor.tag_configure("hl_number", foreground=number_color)
+    
+    # Raise priority
+    code_editor.tag_raise("hl_string")
+    code_editor.tag_raise("hl_char")
+    code_editor.tag_raise("hl_comment")
 
 def load_syntax(file_path, silent=False):
-    global theme, tag_map, compiled_syntax_regex
+    global theme
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
-            theme = {k: v for k, v in loaded.items() if k != "name"}
-        tag_map = {}
-        patterns = []
-        for word, color in theme.items():
-            tag_name = f"hl_{word.replace('#', 'hash').replace(':', 'colon')}"
-            code_editor.tag_configure(tag_name, foreground=color)
-            tag_map[word] = tag_name
-            if word.startswith("#"):
-                patterns.append(re.escape(word))
-            else:
-                patterns.append(rf"\b{re.escape(word)}\b")
-        compiled_syntax_regex = re.compile("|".join(patterns)) if patterns else None
+            theme = loaded  # Now theme is the full dict with sub-dicts
+        
         if not silent:
             messagebox.showinfo("Syntax Loaded", f"Loaded: {os.path.basename(file_path)}")
         highlight_code()
@@ -452,9 +677,8 @@ def load_syntax(file_path, silent=False):
         if not silent:
             messagebox.showerror("Error", f"Failed to load syntax file:\n{e}")
         theme = {}
-        tag_map = {}
-        compiled_syntax_regex = None
         highlight_code()
+
 
 load_syntax(SYNTAX_FILE, silent=True)
 
@@ -488,6 +712,7 @@ def save_current_tab():
     except Exception as e:
         messagebox.showerror("Save Failed", f"Could not save:\n{e}")
         return False
+
 
 def save_as_current_tab():
     if active_tab is None:
@@ -527,6 +752,7 @@ def save_as_current_tab():
         messagebox.showerror("Save Failed", f"Could not save:\n{e}")
         return False
 
+
 def open_file():
     filetypes = [("C++ files", "*.cpp *.h *.hpp"), ("Text files", "*.txt"), ("All files", "*.*")]
     path = filedialog.askopenfilename(title="Open File", filetypes=filetypes)
@@ -538,6 +764,7 @@ def open_file():
             return
     new_tab(path=path)
 
+
 # Font & UI helpers
 def update_font_size(size):
     global code_editor_font
@@ -546,11 +773,14 @@ def update_font_size(size):
     code_editor_font = (settings["font_family"], size)
     code_editor.configure(font=code_editor_font)
     update_line_numbers()
+    update_minimap()
+
 
 def update_tab_width(width):
     width = int(width)
     settings["tab_width"] = width
     code_editor.configure(tabs=width * 8)
+
 
 def update_font_lists():
     global available_fonts
@@ -565,20 +795,19 @@ def update_font_lists():
             update_font_size(settings["font_size"])
         else:
             font_family_combo.set(current)
-    if 'output_font_combo' in globals():
-        current = output_font_combo.get()
-        output_font_combo.configure(values=available_fonts)
-        if current not in available_fonts and available_fonts:
-            new_font = "Consolas"
-            output_font_combo.set(new_font)
-            settings["output_font_family"] = new_font
-        else:
-            output_font_combo.set(current)
+
 
 def apply_settings_to_ui(settings_dict):
     settings.update(settings_dict)
     update_font_size(settings["font_size"])
     update_tab_width(settings["tab_width"])
+    
+    # Handle minimap visibility
+    if settings.get("show_minimap", True):
+        minimap.grid(row=0, column=3, sticky="ns")
+    else:
+        minimap.grid_forget()
+    
     try:
         output_box.configure(
             font=(settings["output_font_family"], settings["output_font_size"]),
@@ -587,9 +816,12 @@ def apply_settings_to_ui(settings_dict):
         )
     except tk.TclError:
         pass
+    
     highlight_code()
     highlight_current_line()
     update_line_numbers()
+    update_minimap()
+
 
 # Settings window
 def open_settings():
@@ -792,6 +1024,17 @@ def open_settings():
     syntax_switch.pack(anchor="w", padx=10, pady=5)
     syntax_switch.select() if settings["syntax_highlighting"] else syntax_switch.deselect()
 
+    ctk.CTkLabel(editor_settings_frame, text="Show Code Minimap", font=("Arial", 14)).pack(anchor="w", pady=(20, 5))
+    minimap_switch = ctk.CTkSwitch(
+        editor_settings_frame, text="Enable",
+        command=lambda: (
+            settings.update({"show_minimap": minimap_switch.get()}),
+            apply_settings_to_ui(settings)
+        )
+    )
+    minimap_switch.pack(anchor="w", padx=10, pady=5)
+    minimap_switch.select() if settings["show_minimap"] else minimap_switch.deselect()
+
     # Syntax Tab
     ctk.CTkLabel(syntax_frame, text="Syntax Highlighting Theme", font=("Arial", 16, "bold")).pack(anchor="w", pady=(10, 15))
     available_syntaxes = [f for f in os.listdir(SYNTAX_DIR) if f.endswith(".json")] if os.path.exists(SYNTAX_DIR) else []
@@ -870,6 +1113,7 @@ def open_settings():
             highlight_line_switch.select() if DEFAULT_SETTINGS["highlight_current_line"] else highlight_line_switch.deselect()
             syntax_switch.select() if DEFAULT_SETTINGS["syntax_highlighting"] else syntax_switch.deselect()
             show_system_fonts_switch.deselect()
+            minimap_switch.select() if DEFAULT_SETTINGS["show_minimap"] else minimap_switch.deselect()
             if output_show_system_switch:
                 output_show_system_switch.deselect()
             if output_font_combo:
@@ -905,9 +1149,11 @@ def open_settings():
 
     settings_win.protocol("WM_DELETE_WINDOW", cancel_settings)
 
+
 # Keyboard Shortcuts
 def bind_shortcut(sequence, func):
     app.bind_all(sequence, lambda e: (func(), "break")[1])
+
 
 bind_shortcut("<Control-s>", save_current_tab)
 bind_shortcut("<Control-Shift-s>", open_settings)
@@ -915,6 +1161,7 @@ bind_shortcut("<Control-S>", open_settings)
 bind_shortcut("<Control-o>", open_file)
 bind_shortcut("<Control-t>", lambda: new_tab())
 bind_shortcut("<Control-w>", close_current_tab)
+bind_shortcut("<Control-r>", lambda: run_code())
 
 # Initial tab
 new_tab()
@@ -931,13 +1178,14 @@ code_editor.insert("1.0", tabs[active_tab]["content"])
 highlight_code()
 switch_tab(active_tab)
 
-app.after(100, update_line_numbers)
+app.after(100, lambda: [update_line_numbers(), update_minimap()])
 
 # Right Panel
 right_frame = ctk.CTkFrame(paned, corner_radius=10)
 right_frame.grid_rowconfigure(1, weight=1)
 right_frame.grid_columnconfigure(0, weight=1)
 paned.add(right_frame, minsize=250)
+
 
 def run_code():
     global process
@@ -959,17 +1207,23 @@ def run_code():
     source_file = os.path.abspath(tab["path"])
     output_exe = os.path.splitext(source_file)[0] + ".exe"
 
-    # Check if program is still running
-    if os.path.exists(output_exe):
-        try:
-            os.remove(output_exe)
-        except PermissionError:
-            messagebox.showerror(
-                "Program Still Running",
-                "The previous program is still running.\n\n"
-                "Close the external terminal or finish the program before running again."
-            )
-            return
+    # Optional: add psutil cleanup if you want to force-kill (from earlier versions)
+    # if os.path.exists(output_exe):
+    #     try:
+    #         for proc in psutil.process_iter(['pid', 'name', 'open_files']):
+    #             try:
+    #                 if proc.is_running():
+    #                     for f in proc.open_files():
+    #                         if f.path.lower() == output_exe.lower():
+    #                             print(f"Killing {proc.pid}")
+    #                             proc.kill()
+    #                             break
+    #             except:
+    #                 pass
+    #         os.remove(output_exe)
+    #     except PermissionError:
+    #         messagebox.showerror("Locked", "Close any running instances of the program.")
+    #         return
 
     bundled_compiler = os.path.join("compilers", "mingw64", "bin", "g++.exe")
     if not os.path.exists(bundled_compiler):
@@ -989,6 +1243,7 @@ def run_code():
         f"-std=c++{settings['cpp_standard']}"
     ]
 
+    # Show initial message (safe, no update())
     output_box.configure(state="normal")
     output_box.delete("1.0", "end")
 
@@ -997,7 +1252,9 @@ def run_code():
 
     output_box.insert("end", "⏳ Compiling...\n")
     output_box.configure(state="disabled")
-    output_box.update()
+
+    # Give GUI a tiny breath before starting heavy work
+    app.after(10, lambda: None)  # harmless, just yields to mainloop
 
     def compile_and_run():
         try:
@@ -1010,89 +1267,90 @@ def run_code():
                 creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
             )
 
-            output_box.configure(state="normal")
-
-            if result.returncode != 0:
-                output_box.insert("end", "❌ COMPILATION FAILED\n\n")
-                output_box.insert("end", result.stderr or "Unknown error\n")
-                output_box.insert("end", f"\nReturn code: {result.returncode}\n")
-                output_box.configure(state="disabled")
-                return
-
-            output_box.insert("end", "✓ Compilation successful\n\n")
-            output_box.configure(state="disabled")
-            output_box.update()
-
-            # Check if code uses input (cin, scanf, getline, etc.)
-            code_content = tab["content"].lower()
-            uses_input = any(keyword in code_content for keyword in [
-                'cin', 'scanf', 'getline', 'getchar', 'gets'
-            ])
-
-            # Always use external terminal if enabled OR if program uses input
-            if settings.get("use_external_terminal", False) or uses_input:
-                output_box.configure(state="normal")
-                if uses_input and not settings.get("use_external_terminal", False):
-                    output_box.insert("end", "⚠️ Program requires input - launching in external terminal...\n")
-                else:
-                    output_box.insert("end", "Launching in external terminal...\n")
-                output_box.configure(state="disabled")
-
-                subprocess.Popen(
-                    ["cmd", "/k", output_exe],
-                    cwd=os.path.dirname(source_file),
-                    env=env,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE
-                )
-                return
-
-            # Run in-app without input (for output-only programs)
-            output_box.configure(state="normal")
-            output_box.insert("end", "─" * 60 + "\n")
-            output_box.insert("end", "PROGRAM OUTPUT\n")
-            output_box.insert("end", "─" * 60 + "\n\n")
-            output_box.configure(state="disabled")
-            output_box.update()
-
-            process = subprocess.Popen(
-                [output_exe],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                cwd=os.path.dirname(source_file),
-                env=env,
-                bufsize=1
-            )
-
-            def reader():
-                try:
-                    for line in process.stdout:
-                        app.after(0, lambda l=line: update_output(l))
-                    
-                    process.wait()
-                    app.after(0, lambda: finish_output(process.returncode))
-                except Exception as e:
-                    app.after(0, lambda: update_output(f"\n❌ Error: {e}\n"))
-            
-            def update_output(text):
-                output_box.configure(state="normal")
-                output_box.insert("end", text)
-                output_box.see("end")
-                output_box.configure(state="disabled")
-            
-            def finish_output(returncode):
-                output_box.configure(state="normal")
-                output_box.insert("end", f"\n{'─' * 60}\n")
-                output_box.insert("end", f"Program finished (exit code {returncode})\n")
-                output_box.configure(state="disabled")
-
-            threading.Thread(target=reader, daemon=True).start()
+            # Update GUI from main thread
+            app.after(0, lambda: update_compile_result(result))
 
         except Exception as e:
+            app.after(0, lambda: update_compile_error(e))
+
+    def update_compile_result(result):
+        output_box.configure(state="normal")
+        if result.returncode != 0:
+            output_box.insert("end", "❌ COMPILATION FAILED\n\n")
+            output_box.insert("end", result.stderr or "Unknown error\n")
+            output_box.insert("end", f"\nReturn code: {result.returncode}\n")
+        else:
+            output_box.insert("end", "✓ Compilation successful\n\n")
+        output_box.configure(state="disabled")
+
+        if result.returncode == 0:
+            run_program()
+
+    def update_compile_error(e):
+        output_box.configure(state="normal")
+        output_box.insert("end", f"\n❌ Error: {e}\n")
+        output_box.configure(state="disabled")
+
+    def run_program():
+        code_content = tab["content"].lower()
+        uses_input = any(keyword in code_content for keyword in [
+            'cin', 'scanf', 'getline', 'getchar', 'gets'
+        ])
+
+        if settings.get("use_external_terminal", False) or uses_input:
+            app.after(0, lambda: output_box.configure(state="normal"))
+            msg = "⚠️ Program requires input - launching in external terminal...\n" if uses_input and not settings.get("use_external_terminal") else "Launching in external terminal...\n"
+            app.after(0, lambda: output_box.insert("end", msg))
+            app.after(0, lambda: output_box.configure(state="disabled"))
+
+            subprocess.Popen(
+                ["cmd", "/k", output_exe],
+                cwd=os.path.dirname(source_file),
+                env=env,
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+            return
+
+        # In-app run
+        app.after(0, lambda: output_box.configure(state="normal"))
+        app.after(0, lambda: output_box.insert("end", "─" * 60 + "\nPROGRAM OUTPUT\n" + "─" * 60 + "\n\n"))
+        app.after(0, lambda: output_box.configure(state="disabled"))
+
+        global process
+        process = subprocess.Popen(
+            [output_exe],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=os.path.dirname(source_file),
+            env=env,
+            bufsize=1
+        )
+
+        def reader():
+            try:
+                for line in process.stdout:
+                    app.after(0, lambda l=line: update_output(l))
+                process.wait()
+                app.after(0, lambda: finish_output(process.returncode))
+            except Exception as e:
+                app.after(0, lambda: update_output(f"\n❌ Error: {e}\n"))
+
+        def update_output(text):
             output_box.configure(state="normal")
-            output_box.insert("end", f"\n❌ Error: {e}\n")
+            output_box.insert("end", text)
+            output_box.see("end")
             output_box.configure(state="disabled")
+
+        def finish_output(returncode):
+            output_box.configure(state="normal")
+            output_box.insert("end", f"\n{'─' * 60}\nProgram finished (exit code {returncode})\n")
+            output_box.configure(state="disabled")
+            global process
+            process = None
+
+        threading.Thread(target=reader, daemon=True).start()
 
     threading.Thread(target=compile_and_run, daemon=True).start()
 
@@ -1118,5 +1376,21 @@ output_box.configure(
     fg=settings["output_text_color"],
     bg=settings["output_bg_color"]
 )
+
+
+# Cleanup running child process when app closes
+def on_closing():
+    global process
+    if process is not None and psutil.pid_exists(process.pid):
+        try:
+            p = psutil.Process(process.pid)
+            p.kill()
+            print(f"Killed child process {process.pid} on app exit")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    app.destroy()
+
+app.protocol("WM_DELETE_WINDOW", on_closing)
+
 
 app.mainloop()
