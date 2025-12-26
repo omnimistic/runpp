@@ -42,6 +42,46 @@ DEFAULT_SETTINGS = {
     "show_minimap": True  # NEW: Minimap toggle
 }
 
+# Global compiler preference
+use_system_gpp = False
+compiler_path = None
+mingw_env = None
+
+
+def detect_compiler_at_startup():
+    global use_system_gpp, compiler_path, mingw_env
+
+    # First, check for system g++ in PATH
+    try:
+        result = subprocess.run(
+            ["g++", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=3
+        )
+        if result.returncode == 0:
+            use_system_gpp = True
+            compiler_path = "g++"
+            mingw_env = os.environ.copy()  # use default environment
+            return
+    except Exception:
+        pass  # system g++ not found or failed
+
+    # Fallback to bundled MinGW
+    bundled_compiler = os.path.join("compilers", "mingw64", "bin", "g++.exe")
+    if os.path.exists(bundled_compiler):
+        use_system_gpp = False
+        compiler_path = os.path.abspath(bundled_compiler)
+        mingw_bin_dir = os.path.dirname(compiler_path)
+        mingw_env = os.environ.copy()
+        mingw_env["PATH"] = mingw_bin_dir + os.pathsep + mingw_env.get("PATH", "")
+    else:
+        # No compiler found at all → we'll show error when user tries to run
+        compiler_path = None
+        mingw_env = None
+
+
+
 # Load or create settings
 settings = DEFAULT_SETTINGS.copy()
 if os.path.exists(SETTINGS_FILE):
@@ -1207,34 +1247,13 @@ def run_code():
     source_file = os.path.abspath(tab["path"])
     output_exe = os.path.splitext(source_file)[0] + ".exe"
 
-    # Optional: add psutil cleanup if you want to force-kill (from earlier versions)
-    # if os.path.exists(output_exe):
-    #     try:
-    #         for proc in psutil.process_iter(['pid', 'name', 'open_files']):
-    #             try:
-    #                 if proc.is_running():
-    #                     for f in proc.open_files():
-    #                         if f.path.lower() == output_exe.lower():
-    #                             print(f"Killing {proc.pid}")
-    #                             proc.kill()
-    #                             break
-    #             except:
-    #                 pass
-    #         os.remove(output_exe)
-    #     except PermissionError:
-    #         messagebox.showerror("Locked", "Close any running instances of the program.")
-    #         return
-
-    bundled_compiler = os.path.join("compilers", "mingw64", "bin", "g++.exe")
-    if not os.path.exists(bundled_compiler):
-        messagebox.showerror("Compiler Missing", "Bundled g++.exe not found!")
+    # Use pre-detected compiler
+    if compiler_path is None:
+        messagebox.showerror("Compiler Missing", 
+                           "No compiler found!\n"
+                           "Please install g++ (MinGW) and add it to your PATH,\n"
+                           "or place the bundled MinGW in the 'compilers/mingw64' folder.")
         return
-
-    compiler_path = os.path.abspath(bundled_compiler)
-    mingw_bin_dir = os.path.dirname(compiler_path)
-
-    env = os.environ.copy()
-    env["PATH"] = mingw_bin_dir + os.pathsep + env.get("PATH", "")
 
     compile_cmd = [
         compiler_path,
@@ -1243,18 +1262,19 @@ def run_code():
         f"-std=c++{settings['cpp_standard']}"
     ]
 
-    # Show initial message (safe, no update())
+    # Show initial message
     output_box.configure(state="normal")
     output_box.delete("1.0", "end")
 
+    compiler_name = "System g++" if use_system_gpp else "Bundled MinGW g++"
     if settings.get("show_compiler_cmd", True):
-        output_box.insert("end", "COMPILING:\n" + " ".join(compile_cmd) + "\n\n")
+        output_box.insert("end", f"COMPILING WITH {compiler_name}:\n")
+        output_box.insert("end", " ".join(compile_cmd) + "\n\n")
 
     output_box.insert("end", "⏳ Compiling...\n")
     output_box.configure(state="disabled")
 
-    # Give GUI a tiny breath before starting heavy work
-    app.after(10, lambda: None)  # harmless, just yields to mainloop
+    app.after(10, lambda: None)  # small yield
 
     def compile_and_run():
         try:
@@ -1263,13 +1283,10 @@ def run_code():
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(source_file),
-                env=env,
+                env=mingw_env,
                 creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
             )
-
-            # Update GUI from main thread
             app.after(0, lambda: update_compile_result(result))
-
         except Exception as e:
             app.after(0, lambda: update_compile_error(e))
 
@@ -1306,7 +1323,7 @@ def run_code():
             subprocess.Popen(
                 ["cmd", "/k", output_exe],
                 cwd=os.path.dirname(source_file),
-                env=env,
+                env=mingw_env,
                 creationflags=subprocess.CREATE_NEW_CONSOLE
             )
             return
@@ -1324,7 +1341,7 @@ def run_code():
             stderr=subprocess.STDOUT,
             text=True,
             cwd=os.path.dirname(source_file),
-            env=env,
+            env=mingw_env,
             bufsize=1
         )
 
@@ -1393,4 +1410,5 @@ def on_closing():
 app.protocol("WM_DELETE_WINDOW", on_closing)
 
 
+detect_compiler_at_startup()
 app.mainloop()
