@@ -42,6 +42,9 @@
   <tr>
     <td colspan="2"><img src="for_readme/run.png" alt="Running Code"><br><sub><b>Running Code</b></sub></td>
   </tr>
+  <tr>
+    <td colspan="2"><img src="for_readme/code_map.png" alt="Running Code"><br><sub><b>Code minimap</b></sub></td>
+  </tr>
 </table>
 
 ---
