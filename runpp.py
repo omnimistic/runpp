@@ -4,11 +4,20 @@ from tkinter import filedialog, messagebox, font as tkfont
 import re
 import json
 import os
+import sys
 from fontTools.ttLib import TTFont
 import subprocess
 import threading
 import platform
 import psutil
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -16,10 +25,14 @@ ctk.set_default_color_theme("dark-blue")
 app = ctk.CTk()
 app.title("Run++")
 app.geometry("1000x600")
-app.iconbitmap("icon.ico")
+
+try:
+    app.iconbitmap(resource_path("icon.ico"))
+except Exception:
+    pass
 
 # Settings file
-SETTINGS_FILE = "settings.json"
+SETTINGS_FILE = resource_path("settings.json")
 
 # Default settings
 DEFAULT_SETTINGS = {
@@ -51,7 +64,6 @@ mingw_env = None
 def detect_compiler_at_startup():
     global use_system_gpp, compiler_path, mingw_env
 
-    # First, check for system g++ in PATH
     try:
         result = subprocess.run(
             ["g++", "--version"],
@@ -62,13 +74,12 @@ def detect_compiler_at_startup():
         if result.returncode == 0:
             use_system_gpp = True
             compiler_path = "g++"
-            mingw_env = os.environ.copy()  # use default environment
+            mingw_env = os.environ.copy()
             return
     except Exception:
-        pass  # system g++ not found or failed
+        pass
 
-    # Fallback to bundled MinGW
-    bundled_compiler = os.path.join("compilers", "mingw64", "bin", "g++.exe")
+    bundled_compiler = os.path.join(resource_path("compilers"), "mingw64", "bin", "g++.exe")
     if os.path.exists(bundled_compiler):
         use_system_gpp = False
         compiler_path = os.path.abspath(bundled_compiler)
@@ -76,7 +87,6 @@ def detect_compiler_at_startup():
         mingw_env = os.environ.copy()
         mingw_env["PATH"] = mingw_bin_dir + os.pathsep + mingw_env.get("PATH", "")
     else:
-        # No compiler found at all → we'll show error when user tries to run
         compiler_path = None
         mingw_env = None
 
@@ -96,7 +106,7 @@ else:
         json.dump(settings, f, indent=2)
 
 # Font handling
-FONTS_DIR = "fonts"
+FONTS_DIR = resource_path("fonts")
 DEFAULT_FONTS = {"Consolas", "Courier New", "Monospace"}
 loaded_custom_font_names = set()
 
@@ -194,7 +204,7 @@ if settings["output_font_family"] not in available_fonts and available_fonts:
 code_editor_font = (settings["font_family"], settings["font_size"])
 
 # Syntax variables
-SYNTAX_DIR = "Hsyntax"
+SYNTAX_DIR = resource_path("Hsyntax")
 if not os.path.exists(SYNTAX_DIR):
     os.makedirs(SYNTAX_DIR)
 SYNTAX_FILE = os.path.join(SYNTAX_DIR, settings["current_syntax_file"])
