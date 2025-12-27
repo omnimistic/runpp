@@ -52,7 +52,7 @@ DEFAULT_SETTINGS = {
     "current_syntax_file": "default.json",
     "show_system_fonts": False,
     "use_external_terminal": False,
-    "show_minimap": True  # NEW: Minimap toggle
+    "show_minimap": True
 }
 
 # Global compiler preference
@@ -116,20 +116,20 @@ def clean_code_text(text):
     Remove problematic invisible Unicode characters that cause compilation errors.
     Only removes definitively wrong characters, preserves valid special characters.
     """
-    # Non-breaking spaces → regular space
+    # Non-breaking spaces -> regular space
     text = text.replace('\u00a0', ' ')  # Non-breaking space
     text = text.replace('\u202f', ' ')  # Narrow no-break space
     text = text.replace('\u2007', ' ')  # Figure space
     text = text.replace('\u2009', ' ')  # Thin space
     text = text.replace('\u200a', ' ')  # Hair space
     
-    # Zero-width characters → remove completely
+    # Zero-width characters -> remove completely
     text = text.replace('\u200b', '')   # Zero-width space
     text = text.replace('\u200c', '')   # Zero-width non-joiner
     text = text.replace('\u200d', '')   # Zero-width joiner
     text = text.replace('\ufeff', '')   # Zero-width no-break space (BOM)
     
-    # Right-to-left and left-to-right marks → remove
+    # Right-to-left and left-to-right marks -> remove
     text = text.replace('\u200e', '')   # Left-to-right mark
     text = text.replace('\u200f', '')   # Right-to-left mark
     text = text.replace('\u202a', '')   # Left-to-right embedding
@@ -138,7 +138,7 @@ def clean_code_text(text):
     text = text.replace('\u202d', '')   # Left-to-right override
     text = text.replace('\u202e', '')   # Right-to-left override
     
-    # Soft hyphen → remove
+    # Soft hyphen -> remove
     text = text.replace('\u00ad', '')   # Soft hyphen
     
     return text
@@ -328,12 +328,11 @@ def update_minimap(event=None):
         if canvas_height <= 1:
             return
         
-        # Fixed height per line block (adjust if you want thicker/thinner)
-        block_height = 2  # pixels — increase to 3 or 4 if you prefer chunkier look
+        block_height = 2  # pixels (increase to 3 or 4 for chunkier look)
         
         # Calculate how many lines we can fit (with possible gap)
         max_visible_blocks = canvas_height // block_height
-        # If too many lines, we'll skip some (downsampling)
+        # If too many lines, we'll skip some
         if total_lines > max_visible_blocks * 2:
             # Simple downsampling: group lines into blocks
             group_size = max(1, total_lines // max_visible_blocks)
@@ -345,7 +344,7 @@ def update_minimap(event=None):
             # Take representative line (first in group)
             line = lines[i] if i < total_lines else ""
             
-            # Color logic (same as before)
+            # Color logic
             color = "#333333"  # default
             if '//' in line or '/*' in line or '*/' in line:
                 color = "#4a7a4a"  # Comments
@@ -718,7 +717,7 @@ def load_syntax(file_path, silent=False):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
-            theme = loaded  # Now theme is the full dict with sub-dicts
+            theme = loaded
         
         if not silent:
             messagebox.showinfo("Syntax Loaded", f"Loaded: {os.path.basename(file_path)}")
@@ -1421,4 +1420,5 @@ app.protocol("WM_DELETE_WINDOW", on_closing)
 
 
 detect_compiler_at_startup()
+
 app.mainloop()
